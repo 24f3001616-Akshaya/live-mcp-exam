@@ -5,6 +5,7 @@ from contextvars import ContextVar
 
 import uvicorn
 from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 EMAIL = "24f3001616@ds.study.iitm.ac.in".strip().lower()
 
@@ -24,6 +25,7 @@ class ChallengeHeaderMiddleware:
 
         headers = dict(scope.get("headers", []))
         challenge = headers.get(b"x-exam-challenge")
+
         token = current_challenge.set(
             challenge.decode("ascii") if challenge else None
         )
@@ -36,18 +38,36 @@ class ChallengeHeaderMiddleware:
 
 @mcp.tool()
 def solve_challenge() -> str:
-    """Return the first 16 hex characters of the challenge hash."""
+    """Solve the current exam challenge from the HTTP request headers."""
+
     challenge = current_challenge.get()
 
     if not challenge:
         raise ValueError("Missing X-Exam-Challenge HTTP header")
 
     message = f"{challenge}:{EMAIL}"
-    return hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
+
+    return digest[:16]
 
 
 if __name__ == "__main__":
-    app = ChallengeHeaderMiddleware(mcp.streamable_http_app())
+    security = TransportSecuritySettings(
+        allowed_hosts=[
+            "live-mcp-exam.onrender.com",
+            "live-mcp-exam.onrender.com:*",
+        ],
+        allowed_origins=[
+            "https://live-mcp-exam.onrender.com",
+        ],
+    )
+
+    app = mcp.streamable_http_app(
+        transport_security=security
+    )
+
+    app = ChallengeHeaderMiddleware(app)
+
     uvicorn.run(
         app,
         host="0.0.0.0",
